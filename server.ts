@@ -15,8 +15,11 @@ let config: WebhookConfig = {
 };
 let logs: WebhookLog[] = [];
 
+// Create Router to handle both prefixed (/api/webhook) and direct (/webhook) paths perfectly
+const router = express.Router();
+
 // API: Get webhook configuration
-app.get('/api/webhook/config', (req, res) => {
+router.get('/webhook/config', (req, res) => {
   res.json({
     ...config,
     appUrl: process.env.APP_URL || ''
@@ -24,7 +27,7 @@ app.get('/api/webhook/config', (req, res) => {
 });
 
 // API: Update webhook configuration
-app.post('/api/webhook/config', (req, res) => {
+router.post('/webhook/config', (req, res) => {
   const { verifyToken } = req.body;
   if (typeof verifyToken === 'string') {
     config.verifyToken = verifyToken.trim();
@@ -35,18 +38,18 @@ app.post('/api/webhook/config', (req, res) => {
 });
 
 // API: Get webhook logs
-app.get('/api/webhook/logs', (req, res) => {
+router.get('/webhook/logs', (req, res) => {
   res.json(logs);
 });
 
 // API: Clear webhook logs
-app.delete('/api/webhook/logs', (req, res) => {
+router.delete('/webhook/logs', (req, res) => {
   logs = [];
   res.json({ success: true });
 });
 
 // API: Trigger a mock incoming webhook (useful for testing when client can't expose a public IP yet)
-app.post('/api/webhook/mock', (req, res) => {
+router.post('/webhook/mock', (req, res) => {
   const { type, customBody, customQuery, customHeaders } = req.body;
   const logId = Math.random().toString(36).substring(2, 11);
   const timestamp = new Date().toISOString();
@@ -151,7 +154,7 @@ app.post('/api/webhook/mock', (req, res) => {
 
 // API / Webhook Endpoint: Meta / General Verification Challenge (GET)
 // Handles hub.mode, hub.verify_token, hub.challenge (including dot or bracket notation)
-app.get('/api/webhook', (req, res) => {
+router.get('/webhook', (req, res) => {
   console.log('Incoming GET webhook validation request:', {
     query: req.query,
     headers: req.headers
@@ -243,7 +246,7 @@ app.get('/api/webhook', (req, res) => {
 });
 
 // API / Webhook Endpoint: Receive Webhook Events (POST)
-app.post('/api/webhook', (req, res) => {
+router.post('/webhook', (req, res) => {
   const logId = Math.random().toString(36).substring(2, 11);
   const timestamp = new Date().toISOString();
 
@@ -278,6 +281,10 @@ app.post('/api/webhook', (req, res) => {
   // Always respond with a 200 OK to acknowledge receipt
   res.status(200).json({ success: true, receivedId: logId });
 });
+
+// Mount the Router under both /api and / to handle Vercel routing variants flawlessly
+app.use('/api', router);
+app.use('/', router);
 
 // Vite / Static Serving Integration
 async function startServer() {
