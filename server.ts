@@ -3,218 +3,193 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { WebhookConfig, WebhookLog } from './src/types';
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
+const PORT = 3000;
 
-  // Parse JSON and URL-encoded bodies
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+// Parse JSON and URL-encoded bodies
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-  // In-memory storage
-  let config: WebhookConfig = {
-    verifyToken: 'meta_verify_token_example_123',
-  };
-  let logs: WebhookLog[] = [];
+// In-memory storage (Note: serverless environments may recycle memory)
+let config: WebhookConfig = {
+  verifyToken: 'meta_verify_token_example_123',
+};
+let logs: WebhookLog[] = [];
 
-  // API: Get webhook configuration
-  app.get('/api/webhook/config', (req, res) => {
-    res.json(config);
+// API: Get webhook configuration
+app.get('/api/webhook/config', (req, res) => {
+  res.json({
+    ...config,
+    appUrl: process.env.APP_URL || ''
   });
+});
 
-  // API: Update webhook configuration
-  app.post('/api/webhook/config', (req, res) => {
-    const { verifyToken } = req.body;
-    if (typeof verifyToken === 'string') {
-      config.verifyToken = verifyToken.trim();
-      res.json({ success: true, config });
-    } else {
-      res.status(400).json({ error: 'verifyToken must be a string' });
-    }
-  });
+// API: Update webhook configuration
+app.post('/api/webhook/config', (req, res) => {
+  const { verifyToken } = req.body;
+  if (typeof verifyToken === 'string') {
+    config.verifyToken = verifyToken.trim();
+    res.json({ success: true, config });
+  } else {
+    res.status(400).json({ error: 'verifyToken must be a string' });
+  }
+});
 
-  // API: Get webhook logs
-  app.get('/api/webhook/logs', (req, res) => {
-    res.json(logs);
-  });
+// API: Get webhook logs
+app.get('/api/webhook/logs', (req, res) => {
+  res.json(logs);
+});
 
-  // API: Clear webhook logs
-  app.delete('/api/webhook/logs', (req, res) => {
-    logs = [];
-    res.json({ success: true });
-  });
+// API: Clear webhook logs
+app.delete('/api/webhook/logs', (req, res) => {
+  logs = [];
+  res.json({ success: true });
+});
 
-  // API: Trigger a mock incoming webhook (useful for testing when client can't expose a public IP yet)
-  app.post('/api/webhook/mock', (req, res) => {
-    const { type, customBody, customQuery, customHeaders } = req.body;
-    const logId = Math.random().toString(36).substring(2, 11);
-    const timestamp = new Date().toISOString();
+// API: Trigger a mock incoming webhook (useful for testing when client can't expose a public IP yet)
+app.post('/api/webhook/mock', (req, res) => {
+  const { type, customBody, customQuery, customHeaders } = req.body;
+  const logId = Math.random().toString(36).substring(2, 11);
+  const timestamp = new Date().toISOString();
 
-    if (type === 'verify') {
-      const mode = customQuery?.['hub.mode'] || 'subscribe';
-      const token = customQuery?.['hub.verify_token'] || config.verifyToken;
-      const challenge = customQuery?.['hub.challenge'] || 'challenge_mock_12345';
+  if (type === 'verify') {
+    const mode = customQuery?.['hub.mode'] || 'subscribe';
+    const token = customQuery?.['hub.verify_token'] || config.verifyToken;
+    const challenge = customQuery?.['hub.challenge'] || 'challenge_mock_12345';
 
-      const isVerified = token === config.verifyToken;
+    const isVerified = token === config.verifyToken;
 
-      const mockLog: WebhookLog = {
-        id: logId,
-        timestamp,
-        method: 'GET',
-        headers: {
-          'user-agent': 'Meta-Webhook-Simulator/1.0',
-          'content-type': 'application/json',
-          ...customHeaders
-        },
-        query: {
-          'hub.mode': mode,
-          'hub.verify_token': token,
-          'hub.challenge': challenge,
-          ...customQuery
-        },
-        body: null,
-        status: isVerified ? 'verified' : 'failed',
-        message: isVerified 
-          ? `Verification successful! Responded with challenge: "${challenge}"`
-          : `Verification failed. Token mismatch! Expected "${config.verifyToken}", but received "${token}"`,
-      };
+    const mockLog: WebhookLog = {
+      id: logId,
+      timestamp,
+      method: 'GET',
+      headers: {
+        'user-agent': 'Meta-Webhook-Simulator/1.0',
+        'content-type': 'application/json',
+        ...customHeaders
+      },
+      query: {
+        'hub.mode': mode,
+        'hub.verify_token': token,
+        'hub.challenge': challenge,
+        ...customQuery
+      },
+      body: null,
+      status: isVerified ? 'verified' : 'failed',
+      message: isVerified 
+        ? `Verification successful! Responded with challenge: "${challenge}"`
+        : `Verification failed. Token mismatch! Expected "${config.verifyToken}", but received "${token}"`,
+    };
 
-      logs.unshift(mockLog);
-      res.json({ 
-        success: isVerified, 
-        message: mockLog.message,
-        responseSent: isVerified ? challenge : 'Forbidden (403)'
-      });
-    } else {
-      // Simulate standard webhook event
-      const payload = customBody || {
-        object: 'whatsapp_business_account',
-        entry: [
-          {
-            id: 'WHATSAPP_BUSINESS_ACCOUNT_ID',
-            changes: [
-              {
-                value: {
-                  messaging_product: 'whatsapp',
-                  metadata: {
-                    display_phone_number: '15550000000',
-                    phone_number_id: '100000000000000'
-                  },
-                  contacts: [
-                    {
-                      profile: {
-                        name: 'John Doe'
-                      },
-                      wa_id: '1234567890'
-                    }
-                  ],
-                  messages: [
-                    {
-                      from: '1234567890',
-                      id: 'wamid.HBgLMTIzNDU2Nzg5MFVJZCEyMzQ1Njc4OTBBAA==',
-                      timestamp: Math.floor(Date.now() / 1000).toString(),
-                      text: {
-                        body: 'Hello, this is a mock test message from John Doe!'
-                      },
-                      type: 'text'
-                    }
-                  ]
+    logs.unshift(mockLog);
+    res.json({ 
+      success: isVerified, 
+      message: mockLog.message,
+      responseSent: isVerified ? challenge : 'Forbidden (403)'
+    });
+  } else {
+    // Simulate standard webhook event
+    const payload = customBody || {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: 'WHATSAPP_BUSINESS_ACCOUNT_ID',
+          changes: [
+            {
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '15550000000',
+                  phone_number_id: '100000000000000'
                 },
-                field: 'messages'
-              }
-            ]
-          }
-        ]
-      };
+                contacts: [
+                  {
+                    profile: {
+                      name: 'John Doe'
+                    },
+                    wa_id: '1234567890'
+                  }
+                ],
+                messages: [
+                  {
+                    from: '1234567890',
+                    id: 'wamid.HBgLMTIzNDU2Nzg5MFVJZCEyMzQ1Njc4OTBBAA==',
+                    timestamp: Math.floor(Date.now() / 1000).toString(),
+                    text: {
+                      body: 'Hello, this is a mock test message from John Doe!'
+                    },
+                    type: 'text'
+                  }
+                ]
+              },
+              field: 'messages'
+            }
+          ]
+        }
+      ]
+    };
 
-      const mockLog: WebhookLog = {
-        id: logId,
-        timestamp,
-        method: 'POST',
-        headers: {
-          'user-agent': 'Meta-Webhook-Simulator/1.0',
-          'content-type': 'application/json',
-          'x-hub-signature-256': 'sha256=mock_signature_for_integrity_verification_12345',
-          ...customHeaders
-        },
-        query: customQuery || {},
-        body: payload,
-        status: 'received',
-        message: 'Successfully received webhook event payload.',
-      };
+    const mockLog: WebhookLog = {
+      id: logId,
+      timestamp,
+      method: 'POST',
+      headers: {
+        'user-agent': 'Meta-Webhook-Simulator/1.0',
+        'content-type': 'application/json',
+        'x-hub-signature-256': 'sha256=mock_signature_for_integrity_verification_12345',
+        ...customHeaders
+      },
+      query: customQuery || {},
+      body: payload,
+      status: 'received',
+      message: 'Successfully received webhook event payload.',
+    };
 
-      logs.unshift(mockLog);
-      res.json({ success: true, message: 'Mock event logged.' });
+    logs.unshift(mockLog);
+    res.json({ success: true, message: 'Mock event logged.' });
+  }
+});
+
+// API / Webhook Endpoint: Meta / General Verification Challenge (GET)
+// Handles hub.mode, hub.verify_token, hub.challenge (including dot or bracket notation)
+app.get('/api/webhook', (req, res) => {
+  console.log('Incoming GET webhook validation request:', {
+    query: req.query,
+    headers: req.headers
+  });
+
+  const mode = req.query['hub.mode'] || (req.query['hub'] as any)?.['mode'];
+  const token = req.query['hub.verify_token'] || (req.query['hub'] as any)?.['verify_token'];
+  const challenge = req.query['hub.challenge'] || (req.query['hub'] as any)?.['challenge'];
+
+  const logId = Math.random().toString(36).substring(2, 11);
+  const timestamp = new Date().toISOString();
+
+  // Log the incoming challenge request
+  const queryObj: Record<string, string> = {};
+  if (req.query['hub'] && typeof req.query['hub'] === 'object') {
+    const hub = req.query['hub'] as any;
+    if (hub['mode']) queryObj['hub.mode'] = String(hub['mode']);
+    if (hub['verify_token']) queryObj['hub.verify_token'] = String(hub['verify_token']);
+    if (hub['challenge']) queryObj['hub.challenge'] = String(hub['challenge']);
+  }
+  Object.keys(req.query).forEach((key) => {
+    if (key !== 'hub') {
+      queryObj[key] = String(req.query[key]);
+    } else if (!queryObj['hub.mode']) {
+      queryObj[key] = String(req.query[key]);
     }
   });
 
-  // API / Webhook Endpoint: Meta / General Verification Challenge (GET)
-  // Typically Meta uses query params: hub.mode, hub.verify_token, hub.challenge
-  app.get('/api/webhook', (req, res) => {
-    console.log('Incoming GET webhook validation request:', {
-      query: req.query,
-      headers: req.headers
-    });
+  const headerObj: Record<string, string> = {};
+  Object.keys(req.headers).forEach((key) => {
+    headerObj[key] = String(req.headers[key]);
+  });
 
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
-
-    const logId = Math.random().toString(36).substring(2, 11);
-    const timestamp = new Date().toISOString();
-
-    // Log the incoming challenge request
-    const queryObj: Record<string, string> = {};
-    Object.keys(req.query).forEach((key) => {
-      queryObj[key] = String(req.query[key]);
-    });
-
-    const headerObj: Record<string, string> = {};
-    Object.keys(req.headers).forEach((key) => {
-      headerObj[key] = String(req.headers[key]);
-    });
-
-    // Check if verification parameters are provided
-    if (mode && token) {
-      if (mode === 'subscribe' && token === config.verifyToken) {
-        // Log successful verification
-        const newLog: WebhookLog = {
-          id: logId,
-          timestamp,
-          method: 'GET',
-          headers: headerObj,
-          query: queryObj,
-          body: null,
-          status: 'verified',
-          message: `Verification successful! Responded with challenge code.`,
-        };
-        logs.unshift(newLog);
-
-        console.log(`Webhook verification successful. Returning challenge: ${challenge}`);
-
-        // Crucial: Respond with challenge as PLAIN TEXT
-        res.setHeader('Content-Type', 'text/plain');
-        res.status(200).send(String(challenge));
-      } else {
-        // Log failed verification (token mismatch)
-        const newLog: WebhookLog = {
-          id: logId,
-          timestamp,
-          method: 'GET',
-          headers: headerObj,
-          query: queryObj,
-          body: null,
-          status: 'failed',
-          message: `Verification failed. Invalid verify token provided. Expected "${config.verifyToken}", but got "${token}".`,
-        };
-        logs.unshift(newLog);
-
-        console.warn(`Webhook verification failed. Token mismatch. Expected "${config.verifyToken}", but got "${token}".`);
-
-        res.status(403).send('Forbidden (Token Mismatch)');
-      }
-    } else {
-      // General GET query without proper hub parameters
+  // Check if verification parameters are provided
+  if (mode && token) {
+    if (mode === 'subscribe' && token === config.verifyToken) {
+      // Log successful verification
       const newLog: WebhookLog = {
         id: logId,
         timestamp,
@@ -222,72 +197,114 @@ async function startServer() {
         headers: headerObj,
         query: queryObj,
         body: null,
-        status: 'received',
-        message: 'Received GET request on webhook endpoint without standard verification parameters.',
+        status: 'verified',
+        message: `Verification successful! Responded with challenge code.`,
       };
       logs.unshift(newLog);
 
-      res.status(200).json({ status: 'ok', message: 'Webhook endpoint is active.' });
+      console.log(`Webhook verification successful. Returning challenge: ${challenge}`);
+
+      // Crucial: Respond with challenge as PLAIN TEXT
+      res.setHeader('Content-Type', 'text/plain');
+      res.status(200).send(String(challenge));
+    } else {
+      // Log failed verification (token mismatch)
+      const newLog: WebhookLog = {
+        id: logId,
+        timestamp,
+        method: 'GET',
+        headers: headerObj,
+        query: queryObj,
+        body: null,
+        status: 'failed',
+        message: `Verification failed. Invalid verify token provided. Expected "${config.verifyToken}", but got "${token}".`,
+      };
+      logs.unshift(newLog);
+
+      console.warn(`Webhook verification failed. Token mismatch. Expected "${config.verifyToken}", but got "${token}".`);
+
+      res.status(403).send('Forbidden (Token Mismatch)');
     }
-  });
-
-  // API / Webhook Endpoint: Receive Webhook Events (POST)
-  app.post('/api/webhook', (req, res) => {
-    const logId = Math.random().toString(36).substring(2, 11);
-    const timestamp = new Date().toISOString();
-
-    const queryObj: Record<string, string> = {};
-    Object.keys(req.query).forEach((key) => {
-      queryObj[key] = String(req.query[key]);
-    });
-
-    const headerObj: Record<string, string> = {};
-    Object.keys(req.headers).forEach((key) => {
-      headerObj[key] = String(req.headers[key]);
-    });
-
+  } else {
+    // General GET query without proper hub parameters
     const newLog: WebhookLog = {
       id: logId,
       timestamp,
-      method: 'POST',
+      method: 'GET',
       headers: headerObj,
       query: queryObj,
-      body: req.body,
+      body: null,
       status: 'received',
-      message: 'Incoming event payload received.',
+      message: 'Received GET request on webhook endpoint without standard verification parameters.',
     };
-
     logs.unshift(newLog);
 
-    // Keep logs size reasonable (e.g. max 100 entries)
-    if (logs.length > 100) {
-      logs = logs.slice(0, 100);
-    }
+    res.status(200).json({ status: 'ok', message: 'Webhook endpoint is active.' });
+  }
+});
 
-    // Always respond with a 200 OK to acknowledge receipt
-    res.status(200).json({ success: true, receivedId: logId });
+// API / Webhook Endpoint: Receive Webhook Events (POST)
+app.post('/api/webhook', (req, res) => {
+  const logId = Math.random().toString(36).substring(2, 11);
+  const timestamp = new Date().toISOString();
+
+  const queryObj: Record<string, string> = {};
+  Object.keys(req.query).forEach((key) => {
+    queryObj[key] = String(req.query[key]);
   });
 
-  // Vite Integration
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+  const headerObj: Record<string, string> = {};
+  Object.keys(req.headers).forEach((key) => {
+    headerObj[key] = String(req.headers[key]);
+  });
+
+  const newLog: WebhookLog = {
+    id: logId,
+    timestamp,
+    method: 'POST',
+    headers: headerObj,
+    query: queryObj,
+    body: req.body,
+    status: 'received',
+    message: 'Incoming event payload received.',
+  };
+
+  logs.unshift(newLog);
+
+  // Keep logs size reasonable (e.g. max 100 entries)
+  if (logs.length > 100) {
+    logs = logs.slice(0, 100);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  // Always respond with a 200 OK to acknowledge receipt
+  res.status(200).json({ success: true, receivedId: logId });
+});
+
+// Vite / Static Serving Integration
+async function startServer() {
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV !== 'production') {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  }
 }
 
 startServer().catch((err) => {
   console.error('Failed to start server:', err);
 });
+
+export default app;

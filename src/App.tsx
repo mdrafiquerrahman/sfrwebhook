@@ -53,8 +53,10 @@ export default function App() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<{success: boolean; message: string} | null>(null);
 
-  // Computed Callback URL based on current origin
-  const callbackUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/webhook` : '';
+  // Computed Callback URL based on server's public APP_URL or current origin
+  const callbackUrl = config?.appUrl 
+    ? `${config.appUrl}/api/webhook` 
+    : (typeof window !== 'undefined' ? `${window.location.origin}/api/webhook` : '');
 
   // Fetch initial config and logs
   const fetchData = useCallback(async (showLoading = false) => {

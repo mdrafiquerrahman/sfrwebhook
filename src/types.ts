@@ -1,5 +1,6 @@
 export interface WebhookConfig {
   verifyToken: string;
+  appUrl?: string;
 }
 
 export interface WebhookLog {
