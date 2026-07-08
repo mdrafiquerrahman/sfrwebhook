@@ -1,0 +1,6 @@
+{
+  "name": "Webhook Verification Tool",
+  "description": "Configure, verify, and inspect incoming webhook requests with full payload logging and verification token support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
