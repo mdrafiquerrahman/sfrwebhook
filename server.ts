@@ -4,6 +4,11 @@ import app from './api/index';
 
 const PORT = 3000;
 
+// Prevent any unhandled /api requests from falling through to static/Vite HTML fallback handlers
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `API endpoint not found: ${req.method} ${req.path}` });
+});
+
 // Vite / Static Serving Integration
 async function startServer() {
   if (!process.env.VERCEL) {

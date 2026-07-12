@@ -54,7 +54,7 @@ export default function App() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<{success: boolean; message: string} | null>(null);
 
-  const hasConnectedOnce = useRef(false);
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
 
   // Computed Callback URL based on server's public APP_URL or current origin
   const callbackUrl = config?.appUrl 
@@ -89,10 +89,10 @@ export default function App() {
       setLogs(logsData);
       setError(null);
       setIsReconnecting(false);
-      hasConnectedOnce.current = true;
+      setHasConnectedOnce(true);
     } catch (err: any) {
       console.error(err);
-      if (hasConnectedOnce.current) {
+      if (hasConnectedOnce) {
         setIsReconnecting(true);
       } else {
         setError(err.message || 'Could not connect to the server. Please verify the backend is running.');
@@ -100,7 +100,7 @@ export default function App() {
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, []);
+  }, [hasConnectedOnce]);
 
   // Fetch immediately on mount, then poll logs
   useEffect(() => {
@@ -255,6 +255,42 @@ export default function App() {
       setIsSimulating(false);
     }
   };
+
+  if (!hasConnectedOnce) {
+    return (
+      <div className="min-h-screen bg-[#fafbfc] flex flex-col items-center justify-center p-6 font-sans">
+        <div className="p-8 bg-white rounded-2xl border border-[#e1e4e6] shadow-md max-w-md w-full text-center space-y-5">
+          <div className="inline-flex p-3 bg-indigo-50 text-indigo-600 rounded-2xl border border-indigo-100">
+            <Terminal size={32} className={error ? "" : "animate-pulse"} />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold text-slate-900">
+              {error ? "Connecting to Webhook Server..." : "Initializing Webhook Tester"}
+            </h2>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              {error 
+                ? "The backend service is starting up or warming up. We are automatically retrying to establish a secure connection..." 
+                : "Please wait while the server initializes and compiles the application assets. This usually takes just a few seconds..."}
+            </p>
+          </div>
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-left">
+              <p className="text-[11px] text-red-700 font-mono break-words leading-normal">{error}</p>
+            </div>
+          )}
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <RefreshCw size={24} className="text-indigo-600 animate-spin" />
+            <button 
+              onClick={() => fetchData(true)}
+              className="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
+            >
+              Force Connection Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#fafbfc] text-[#24292f] font-sans">
