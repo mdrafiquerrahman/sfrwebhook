@@ -259,16 +259,29 @@ router.post('/webhook', (req, res) => {
     JSON.stringify(body, null, 2)
   );
 
+  const messagingEvents = body.entry?.[0]?.messaging || [];
   let customMessage = 'Incoming event payload received.';
+  const messagesFound: string[] = [];
 
-  const messaging = body.entry?.[0]?.messaging?.[0];
-  if (messaging?.message?.text) {
-    const senderId = messaging.sender.id;
-    const text = messaging.message.text;
+  for (const event of messagingEvents) {
+    console.log("Event Type:", Object.keys(event));
 
-    console.log("Sender:", senderId);
-    console.log("Message:", text);
-    customMessage = `Instagram message from ${senderId}: "${text}"`;
+    if (event.message?.text) {
+      const senderId = event.sender?.id;
+      const text = event.message.text;
+      console.log("Sender:", senderId);
+      console.log("Message:", text);
+      messagesFound.push(`Instagram message from ${senderId}: "${text}"`);
+    }
+
+    if (event.message_edit) {
+      console.log("Message Edit Event");
+      messagesFound.push(`Message Edit Event`);
+    }
+  }
+
+  if (messagesFound.length > 0) {
+    customMessage = messagesFound.join(' | ');
   } else {
     // Try to detect other common Meta webhook formats (e.g. WhatsApp, etc.)
     const change = body.entry?.[0]?.changes?.[0]?.value;
