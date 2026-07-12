@@ -252,6 +252,10 @@ router.post('/webhook', (req, res) => {
   const logId = Math.random().toString(36).substring(2, 11);
   const timestamp = new Date().toISOString();
 
+  // Print to console logs for Vercel/Render output
+  console.log("========== INSTAGRAM WEBHOOK ==========");
+  console.log(JSON.stringify(req.body, null, 2));
+
   const queryObj: Record<string, string> = {};
   Object.keys(req.query).forEach((key) => {
     queryObj[key] = String(req.query[key]);
