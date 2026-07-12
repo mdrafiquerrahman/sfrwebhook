@@ -269,9 +269,51 @@ router.post('/webhook', (req, res) => {
     if (event.message?.text) {
       const senderId = event.sender?.id;
       const text = event.message.text;
-      console.log("Sender:", senderId);
+      console.log("Sender ID:", senderId);
       console.log("Message:", text);
       messagesFound.push(`Instagram message from ${senderId}: "${text}"`);
+
+      // Trigger automatic reply if PAGE_ACCESS_TOKEN is configured
+      const pageAccessToken = process.env.PAGE_ACCESS_TOKEN;
+      if (pageAccessToken && senderId) {
+        console.log(`Sending auto-reply to Sender: ${senderId}...`);
+        fetch(
+          `https://graph.facebook.com/v25.0/me/messages?access_token=${pageAccessToken}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              recipient: {
+                id: senderId,
+              },
+              message: {
+                text: "Hello! Thanks for messaging SFR DigTech.",
+              },
+            }),
+          }
+        )
+        .then(async (response) => {
+          const contentType = response.headers.get("content-type") || "";
+          const text = await response.text();
+          if (contentType.includes("application/json")) {
+            try {
+              const resData = JSON.parse(text);
+              console.log("Auto-reply response:", JSON.stringify(resData, null, 2));
+            } catch (jsonErr) {
+              console.error("Failed to parse auto-reply JSON response:", jsonErr, "Original text:", text);
+            }
+          } else {
+            console.log("Auto-reply response (non-JSON text):", text);
+          }
+        })
+        .catch((err) => {
+          console.error("Error sending auto-reply:", err);
+        });
+      } else {
+        console.log("Skipping auto-reply: PAGE_ACCESS_TOKEN or senderId is missing.");
+      }
     }
 
     if (event.message_edit) {

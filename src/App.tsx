@@ -49,9 +49,12 @@ export default function App() {
   // Loading/Error states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [isUpdatingToken, setIsUpdatingToken] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<{success: boolean; message: string} | null>(null);
+
+  const hasConnectedOnce = useRef(false);
 
   // Computed Callback URL based on server's public APP_URL or current origin
   const callbackUrl = config?.appUrl 
@@ -71,6 +74,13 @@ export default function App() {
         throw new Error('Failed to retrieve configuration or logs from server.');
       }
 
+      const configContentType = configRes.headers.get('content-type') || '';
+      const logsContentType = logsRes.headers.get('content-type') || '';
+
+      if (!configContentType.includes('application/json') || !logsContentType.includes('application/json')) {
+        throw new Error('Server returned an unexpected non-JSON response (possibly still starting up or routing incorrectly).');
+      }
+
       const configData: WebhookConfig = await configRes.json();
       const logsData: WebhookLog[] = await logsRes.json();
 
@@ -78,9 +88,15 @@ export default function App() {
       setInputToken(configData.verifyToken);
       setLogs(logsData);
       setError(null);
+      setIsReconnecting(false);
+      hasConnectedOnce.current = true;
     } catch (err: any) {
       console.error(err);
-      setError('Could not connect to the server. Please verify the backend is running.');
+      if (hasConnectedOnce.current) {
+        setIsReconnecting(true);
+      } else {
+        setError(err.message || 'Could not connect to the server. Please verify the backend is running.');
+      }
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -126,6 +142,11 @@ export default function App() {
       });
 
       if (!res.ok) throw new Error('Failed to update verification token');
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Server returned an unexpected non-JSON response.');
+      }
 
       const data = await res.json();
       setConfig(data.config);
@@ -210,6 +231,12 @@ export default function App() {
       });
 
       if (!res.ok) throw new Error('Simulation failed on backend');
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Server returned an unexpected non-JSON response.');
+      }
+
       const data = await res.json();
 
       setSimulationResult({
@@ -254,10 +281,17 @@ export default function App() {
               <RefreshCw size={14} className={`${loading ? 'animate-spin' : ''}`} />
               Sync Status
             </button>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              Server Active
-            </span>
+            {isReconnecting ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-50 text-amber-700 border border-amber-200 animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                Reconnecting...
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Server Active
+              </span>
+            )}
           </div>
         </div>
       </header>
