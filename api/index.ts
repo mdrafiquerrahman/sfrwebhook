@@ -253,8 +253,34 @@ router.post('/webhook', (req, res) => {
   const timestamp = new Date().toISOString();
 
   // Print to console logs for Vercel/Render output
-  console.log("========== INSTAGRAM WEBHOOK ==========");
-  console.log(JSON.stringify(req.body, null, 2));
+  const body = req.body || {};
+  console.log(
+    "Instagram Webhook:",
+    JSON.stringify(body, null, 2)
+  );
+
+  let customMessage = 'Incoming event payload received.';
+
+  const messaging = body.entry?.[0]?.messaging?.[0];
+  if (messaging?.message?.text) {
+    const senderId = messaging.sender.id;
+    const text = messaging.message.text;
+
+    console.log("Sender:", senderId);
+    console.log("Message:", text);
+    customMessage = `Instagram message from ${senderId}: "${text}"`;
+  } else {
+    // Try to detect other common Meta webhook formats (e.g. WhatsApp, etc.)
+    const change = body.entry?.[0]?.changes?.[0]?.value;
+    const waMessage = change?.messages?.[0];
+    if (waMessage?.text?.body) {
+      const from = waMessage.from;
+      const text = waMessage.text.body;
+      customMessage = `WhatsApp message from ${from}: "${text}"`;
+    } else if (change?.field) {
+      customMessage = `Received event for field: ${change.field}`;
+    }
+  }
 
   const queryObj: Record<string, string> = {};
   Object.keys(req.query).forEach((key) => {
@@ -274,7 +300,7 @@ router.post('/webhook', (req, res) => {
     query: queryObj,
     body: req.body,
     status: 'received',
-    message: 'Incoming event payload received.',
+    message: customMessage,
   };
 
   logs.unshift(newLog);
