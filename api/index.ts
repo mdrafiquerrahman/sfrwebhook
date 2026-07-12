@@ -1,5 +1,7 @@
 import express from 'express';
 import { WebhookConfig, WebhookLog } from '../src/types';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 
@@ -7,13 +9,44 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+const CONFIG_FILE = path.join(process.cwd(), 'webhook-config.json');
+
+function loadConfig(): WebhookConfig {
+  const defaultConfig: WebhookConfig = {
+    verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || 'meta_verify_token_example_123',
+    pageAccessToken: process.env.PAGE_ACCESS_TOKEN || '',
+    autoReplyText: process.env.AUTO_REPLY_TEXT || 'Hello! Thanks for messaging SFR DigTech.',
+    replyDelaySeconds: parseInt(process.env.REPLY_DELAY_SECONDS || '0', 10), // Default to 0 seconds (Instant) as recommended for serverless environments
+  };
+
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const data = fs.readFileSync(CONFIG_FILE, 'utf8');
+      const parsed = JSON.parse(data);
+      console.log('Loaded persistent configuration from webhook-config.json');
+      return {
+        ...defaultConfig,
+        ...parsed
+      };
+    }
+  } catch (err) {
+    console.warn('Could not read webhook-config.json, using environment/default config:', err);
+  }
+
+  return defaultConfig;
+}
+
+function saveConfig(newConfig: WebhookConfig) {
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2), 'utf8');
+    console.log('Successfully saved configuration to webhook-config.json');
+  } catch (err) {
+    console.warn('Could not write webhook-config.json (this is expected in read-only environments like Vercel):', err);
+  }
+}
+
 // In-memory storage (Note: serverless environments may recycle memory)
-let config: WebhookConfig = {
-  verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || 'meta_verify_token_example_123',
-  pageAccessToken: process.env.PAGE_ACCESS_TOKEN || '',
-  autoReplyText: process.env.AUTO_REPLY_TEXT || 'Hello! Thanks for messaging SFR DigTech.',
-  replyDelaySeconds: parseInt(process.env.REPLY_DELAY_SECONDS || '0', 10), // Default to 0 seconds (Instant) as recommended for serverless environments
-};
+let config: WebhookConfig = loadConfig();
 let logs: WebhookLog[] = [];
 const processedMids = new Set<string>();
 
@@ -43,6 +76,7 @@ router.post('/webhook/config', (req, res) => {
   if (replyDelaySeconds !== undefined) {
     config.replyDelaySeconds = Number(replyDelaySeconds);
   }
+  saveConfig(config);
   res.json({ success: true, config });
 });
 

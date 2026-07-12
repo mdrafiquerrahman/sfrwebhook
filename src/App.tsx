@@ -80,6 +80,9 @@ export default function App() {
     ? `${config.appUrl}/api/webhook` 
     : (typeof window !== 'undefined' ? `${window.location.origin}/api/webhook` : '');
 
+  const isVercel = (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) || 
+    (config?.appUrl && config.appUrl.includes('vercel.app'));
+
   // Fetch initial config and logs
   const fetchData = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -422,6 +425,42 @@ export default function App() {
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">This endpoint parses verification checks and accepts standard event notifications.</p>
                 </div>
+
+                {/* Vercel Serverless Hosting Instructions Callout */}
+                {isVercel && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 space-y-2.5">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                      <AlertCircle size={15} className="text-amber-600 shrink-0" />
+                      <span>Vercel Serverless Hosting Detected</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-amber-800">
+                      Because Vercel uses <strong>stateless serverless functions</strong>, in-memory updates saved on this page are temporary and reset automatically. To make your settings permanent, choose one of these methods:
+                    </p>
+                    <div className="pl-3 border-l-2 border-amber-300 space-y-2.5 text-[11px]">
+                      <div>
+                        <p className="font-bold text-amber-800">Method 1: Add Vercel Environment Variables (Recommended)</p>
+                        <p className="text-amber-800">Add these key-value pairs in your Vercel Project Dashboard settings:</p>
+                        <ul className="list-disc pl-4 mt-1.5 space-y-1 font-mono text-[10px]">
+                          <li>
+                            <strong className="text-amber-950 font-sans">PAGE_ACCESS_TOKEN</strong> = <span className="bg-amber-100/70 px-1 rounded break-all">{inputPageAccessToken ? `${inputPageAccessToken.substring(0, 10)}...` : 'your_token'}</span>
+                          </li>
+                          <li>
+                            <strong className="text-amber-950 font-sans">AUTO_REPLY_TEXT</strong> = <span className="bg-amber-100/70 px-1 rounded">"{inputAutoReplyText || 'Hello! Thanks for messaging SFR DigTech.'}"</span>
+                          </li>
+                          <li>
+                            <strong className="text-amber-950 font-sans">WEBHOOK_VERIFY_TOKEN</strong> = <span className="bg-amber-100/70 px-1 rounded">"{inputToken}"</span>
+                          </li>
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-bold text-amber-800">Method 2: Commit Config File</p>
+                        <p className="text-amber-800">
+                          Your configuration is also saved into the file <code className="bg-amber-100/70 px-1 rounded font-mono text-[10px]">webhook-config.json</code> in this workspace. Committing and pushing this file to your GitHub repository makes it active permanently on Vercel!
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Configuration Settings Form */}
                 <form onSubmit={handleUpdateConfig} className="space-y-4 pt-2 border-t border-slate-100">
