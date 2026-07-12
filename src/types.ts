@@ -1,6 +1,9 @@
 export interface WebhookConfig {
   verifyToken: string;
   appUrl?: string;
+  pageAccessToken?: string;
+  autoReplyText?: string;
+  replyDelaySeconds?: number;
 }
 
 export interface WebhookLog {

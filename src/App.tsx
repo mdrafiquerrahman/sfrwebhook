@@ -26,6 +26,9 @@ import { WebhookConfig, WebhookLog } from './types';
 export default function App() {
   const [config, setConfig] = useState<WebhookConfig | null>(null);
   const [inputToken, setInputToken] = useState('');
+  const [inputPageAccessToken, setInputPageAccessToken] = useState('');
+  const [inputAutoReplyText, setInputAutoReplyText] = useState('');
+  const [inputReplyDelaySeconds, setInputReplyDelaySeconds] = useState<number>(120);
   const [logs, setLogs] = useState<WebhookLog[]>([]);
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'simulator' | 'custom'>('simulator');
@@ -33,24 +36,40 @@ export default function App() {
   // Copy states
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedPageToken, setCopiedPageToken] = useState(false);
   const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
 
   // Custom Simulator state
   const [customBody, setCustomBody] = useState(JSON.stringify({
-    event: "user.created",
-    data: {
-      id: "usr_942817",
-      name: "Alice Johnson",
-      email: "alice@example.com",
-      created_at: new Date().toISOString()
-    }
+    "object": "instagram",
+    "entry": [
+      {
+        "time": 1783880292583,
+        "id": "17841405765924832",
+        "messaging": [
+          {
+            "sender": {
+              "id": "1666639284565392"
+            },
+            "recipient": {
+              "id": "17841405765924832"
+            },
+            "timestamp": 1783880292117,
+            "message_edit": {
+              "mid": "aWdfZAG1faXRlbToxOklHTWVzc2FnZAUlEOjE3ODQxNDA1NzY1OTI0ODMyOjM0MDI4MjM2Njg0MTcxMDMwMTI0NDI1ODYzMTM2Njk3Mjg0MjI0NTozMjkwNjc4MzE4NTMzMjU4ODM3MTM0OTU2MTI1MDE1MjQ0OAZDZD",
+              "num_edit": 0
+            }
+          }
+        ]
+      }
+    ]
   }, null, 2));
 
   // Loading/Error states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [isUpdatingToken, setIsUpdatingToken] = useState(false);
+  const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<{success: boolean; message: string} | null>(null);
 
@@ -86,6 +105,9 @@ export default function App() {
 
       setConfig(configData);
       setInputToken(configData.verifyToken);
+      setInputPageAccessToken(configData.pageAccessToken || '');
+      setInputAutoReplyText(configData.autoReplyText || '');
+      setInputReplyDelaySeconds(configData.replyDelaySeconds !== undefined ? configData.replyDelaySeconds : 120);
       setLogs(logsData);
       setError(null);
       setIsReconnecting(false);
@@ -128,20 +150,25 @@ export default function App() {
     }
   };
 
-  // Save updated verification token to server
-  const handleUpdateToken = async (e: FormEvent) => {
+  // Save updated configuration settings to server
+  const handleUpdateConfig = async (e: FormEvent) => {
     e.preventDefault();
     if (!inputToken.trim()) return;
 
-    setIsUpdatingToken(true);
+    setIsUpdatingConfig(true);
     try {
       const res = await fetch('/api/webhook/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verifyToken: inputToken.trim() }),
+        body: JSON.stringify({ 
+          verifyToken: inputToken.trim(),
+          pageAccessToken: inputPageAccessToken.trim(),
+          autoReplyText: inputAutoReplyText,
+          replyDelaySeconds: Number(inputReplyDelaySeconds)
+        }),
       });
 
-      if (!res.ok) throw new Error('Failed to update verification token');
+      if (!res.ok) throw new Error('Failed to update configuration settings.');
 
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
@@ -152,16 +179,16 @@ export default function App() {
       setConfig(data.config);
       setSimulationResult({
         success: true,
-        message: `Verification token updated successfully to "${data.config.verifyToken}"`
+        message: 'Configuration updated successfully.'
       });
       setTimeout(() => setSimulationResult(null), 4000);
     } catch (err: any) {
       setSimulationResult({
         success: false,
-        message: err.message || 'Error updating token.'
+        message: err.message || 'Error updating configuration settings.'
       });
     } finally {
-      setIsUpdatingToken(false);
+      setIsUpdatingConfig(false);
     }
   };
 
@@ -179,7 +206,7 @@ export default function App() {
   };
 
   // Run mock simulation requests
-  const triggerSimulation = async (type: 'verify-success' | 'verify-fail' | 'whatsapp' | 'custom') => {
+  const triggerSimulation = async (type: 'verify-success' | 'verify-fail' | 'whatsapp' | 'instagram-text' | 'instagram-hii' | 'instagram-edit' | 'custom') => {
     setIsSimulating(true);
     setSimulationResult(null);
 
@@ -204,8 +231,13 @@ export default function App() {
         }
       };
     } else if (type === 'whatsapp') {
-      // Keep payload as WhatsApp format (handled by backend or generated here)
       payload = { type: 'whatsapp' };
+    } else if (type === 'instagram-text') {
+      payload = { type: 'instagram-text' };
+    } else if (type === 'instagram-hii') {
+      payload = { type: 'instagram-hii' };
+    } else if (type === 'instagram-edit') {
+      payload = { type: 'instagram-edit' };
     } else if (type === 'custom') {
       try {
         const parsed = JSON.parse(customBody);
@@ -391,14 +423,15 @@ export default function App() {
                   <p className="text-[11px] text-slate-400 mt-1">This endpoint parses verification checks and accepts standard event notifications.</p>
                 </div>
 
-                {/* Verification Token Form */}
-                <form onSubmit={handleUpdateToken}>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
-                    <span>VERIFY TOKEN</span>
-                    <span className="text-[10px] text-purple-600 font-medium bg-purple-50 px-1.5 py-0.5 rounded">Shared Secret</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1 flex items-center">
+                {/* Configuration Settings Form */}
+                <form onSubmit={handleUpdateConfig} className="space-y-4 pt-2 border-t border-slate-100">
+                  {/* Verify Token Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span>VERIFY TOKEN</span>
+                      <span className="text-[10px] text-purple-600 font-medium bg-purple-50 px-1.5 py-0.5 rounded">Shared Secret</span>
+                    </label>
+                    <div className="relative flex items-center">
                       <input
                         type="text"
                         value={inputToken}
@@ -415,17 +448,100 @@ export default function App() {
                         {copiedToken ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
                       </button>
                     </div>
-                    <button
-                      type="submit"
-                      disabled={isUpdatingToken || inputToken === config?.verifyToken}
-                      className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all border border-transparent shadow-xs cursor-pointer flex items-center gap-1 shrink-0"
-                    >
-                      Update
-                    </button>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Must match the <strong>Verify token</strong> field in Meta developer portal.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Set a secret phrase here and enter the identical phrase in the <span className="font-semibold text-slate-600">Verify token</span> field on Meta.
-                  </p>
+
+                  {/* Page Access Token Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span>PAGE ACCESS TOKEN (Optional)</span>
+                      <span className="text-[10px] text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded">Instagram Auto-Reply</span>
+                    </label>
+                    <div className="relative flex items-center">
+                      <input
+                        type="password"
+                        value={inputPageAccessToken}
+                        onChange={(e) => setInputPageAccessToken(e.target.value)}
+                        placeholder="EAAB..."
+                        className="w-full pr-10 pl-3 py-2 text-xs font-mono bg-white border border-slate-200 rounded-lg text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(inputPageAccessToken);
+                          setCopiedPageToken(true);
+                          setTimeout(() => setCopiedPageToken(false), 2000);
+                        }}
+                        className="absolute right-1 p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-slate-100 rounded-md transition-all cursor-pointer"
+                        title="Copy access token"
+                      >
+                        {copiedPageToken ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Required for live automatic direct replies back to Instagram clients.
+                    </p>
+                  </div>
+
+                  {/* Auto-Reply Text Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span>AUTO-REPLY CUSTOM MESSAGE</span>
+                      <span className="text-[10px] text-indigo-600 font-medium bg-indigo-50 px-1.5 py-0.5 rounded">Greeting</span>
+                    </label>
+                    <textarea
+                      value={inputAutoReplyText}
+                      onChange={(e) => setInputAutoReplyText(e.target.value)}
+                      placeholder="e.g. Hello! Thanks for messaging us."
+                      rows={2}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all resize-none"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      The dynamic response body triggered upon receipt of any valid message.
+                    </p>
+                  </div>
+
+                  {/* Auto-Reply Delay Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span>AUTO-REPLY DELAY</span>
+                      <span className="text-[10px] text-amber-600 font-medium bg-amber-50 px-1.5 py-0.5 rounded">Timing Control</span>
+                    </label>
+                    <select
+                      value={inputReplyDelaySeconds}
+                      onChange={(e) => setInputReplyDelaySeconds(Number(e.target.value))}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all cursor-pointer"
+                    >
+                      <option value={0}>Instant (0 seconds)</option>
+                      <option value={5}>5 seconds</option>
+                      <option value={30}>30 seconds</option>
+                      <option value={60}>1 minute</option>
+                      <option value={120}>2 minutes (Default)</option>
+                      <option value={180}>3 minutes</option>
+                      <option value={300}>5 minutes</option>
+                    </select>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Controls how long the system waits before sending the auto-reply back to the client.
+                    </p>
+                  </div>
+
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    disabled={
+                      isUpdatingConfig || 
+                      (inputToken === config?.verifyToken && 
+                       inputPageAccessToken === (config?.pageAccessToken || '') &&
+                       inputAutoReplyText === (config?.autoReplyText || '') &&
+                       inputReplyDelaySeconds === (config?.replyDelaySeconds ?? 120))
+                    }
+                    className="w-full mt-2 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all border border-transparent shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Settings size={13} className={isUpdatingConfig ? "animate-spin" : ""} />
+                    {isUpdatingConfig ? 'Updating configuration...' : 'Update Configuration'}
+                  </button>
                 </form>
               </div>
             </div>
@@ -538,6 +654,51 @@ export default function App() {
                         <p className="text-[10px] text-slate-400">Incoming message hook containing sender, WA ID and text body.</p>
                       </div>
                       <Send size={12} className="text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
+                    </button>
+
+                    <button
+                      onClick={() => triggerSimulation('instagram-text')}
+                      disabled={isSimulating}
+                      className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:border-pink-200 hover:bg-pink-50/20 text-left transition-all group cursor-pointer disabled:opacity-50"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.2 bg-pink-50 text-pink-700 font-semibold rounded text-[9px]">POST</span>
+                          Instagram Text Message
+                        </div>
+                        <p className="text-[10px] text-slate-400">Mocking standard Instagram direct message event.</p>
+                      </div>
+                      <Send size={12} className="text-slate-400 group-hover:text-pink-600 group-hover:translate-x-0.5 transition-all" />
+                    </button>
+
+                    <button
+                      onClick={() => triggerSimulation('instagram-hii')}
+                      disabled={isSimulating}
+                      className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:border-pink-200 hover:bg-pink-50/20 text-left transition-all group cursor-pointer disabled:opacity-50"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.2 bg-pink-50 text-pink-700 font-semibold rounded text-[9px]">POST</span>
+                          Instagram 'Hii' Message
+                        </div>
+                        <p className="text-[10px] text-slate-400">Mocking standard Instagram direct message event with "Hii".</p>
+                      </div>
+                      <Send size={12} className="text-slate-400 group-hover:text-pink-600 group-hover:translate-x-0.5 transition-all" />
+                    </button>
+
+                    <button
+                      onClick={() => triggerSimulation('instagram-edit')}
+                      disabled={isSimulating}
+                      className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:border-amber-200 hover:bg-amber-50/20 text-left transition-all group cursor-pointer disabled:opacity-50"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.2 bg-amber-50 text-amber-700 font-semibold rounded text-[9px]">POST</span>
+                          Instagram Message Edit
+                        </div>
+                        <p className="text-[10px] text-slate-400">Mocking an edited message payload from Instagram.</p>
+                      </div>
+                      <Send size={12} className="text-slate-400 group-hover:text-amber-600 group-hover:translate-x-0.5 transition-all" />
                     </button>
                   </div>
                 </div>

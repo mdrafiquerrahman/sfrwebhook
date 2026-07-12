@@ -10,8 +10,12 @@ app.use(express.urlencoded({ extended: true }));
 // In-memory storage (Note: serverless environments may recycle memory)
 let config: WebhookConfig = {
   verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || 'meta_verify_token_example_123',
+  pageAccessToken: process.env.PAGE_ACCESS_TOKEN || '',
+  autoReplyText: process.env.AUTO_REPLY_TEXT || 'Hello! Thanks for messaging SFR DigTech.',
+  replyDelaySeconds: parseInt(process.env.REPLY_DELAY_SECONDS || '120', 10), // Default to 120 seconds (2 mins) as requested
 };
 let logs: WebhookLog[] = [];
+const processedMids = new Set<string>();
 
 // Create Router to handle both prefixed (/api/webhook) and direct (/webhook) paths perfectly
 const router = express.Router();
@@ -26,13 +30,20 @@ router.get('/webhook/config', (req, res) => {
 
 // API: Update webhook configuration
 router.post('/webhook/config', (req, res) => {
-  const { verifyToken } = req.body;
+  const { verifyToken, pageAccessToken, autoReplyText, replyDelaySeconds } = req.body;
   if (typeof verifyToken === 'string') {
     config.verifyToken = verifyToken.trim();
-    res.json({ success: true, config });
-  } else {
-    res.status(400).json({ error: 'verifyToken must be a string' });
   }
+  if (typeof pageAccessToken === 'string') {
+    config.pageAccessToken = pageAccessToken.trim();
+  }
+  if (typeof autoReplyText === 'string') {
+    config.autoReplyText = autoReplyText;
+  }
+  if (replyDelaySeconds !== undefined) {
+    config.replyDelaySeconds = Number(replyDelaySeconds);
+  }
+  res.json({ success: true, config });
 });
 
 // API: Get webhook logs
@@ -47,7 +58,7 @@ router.delete('/webhook/logs', (req, res) => {
 });
 
 // API: Trigger a mock incoming webhook (useful for testing when client can't expose a public IP yet)
-router.post('/webhook/mock', (req, res) => {
+router.post('/webhook/mock', async (req, res) => {
   const { type, customBody, customQuery, customHeaders } = req.body;
   const logId = Math.random().toString(36).substring(2, 11);
   const timestamp = new Date().toISOString();
@@ -89,64 +100,142 @@ router.post('/webhook/mock', (req, res) => {
     });
   } else {
     // Simulate standard webhook event
-    const payload = customBody || {
-      object: 'whatsapp_business_account',
-      entry: [
-        {
-          id: 'WHATSAPP_BUSINESS_ACCOUNT_ID',
-          changes: [
+    let payload = customBody;
+    if (!payload) {
+      const generatedMid = 'mock_mid_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+      if (type === 'instagram-text') {
+        payload = {
+          object: 'instagram',
+          entry: [
             {
-              value: {
-                messaging_product: 'whatsapp',
-                metadata: {
-                  display_phone_number: '15550000000',
-                  phone_number_id: '100000000000000'
-                },
-                contacts: [
-                  {
-                    profile: {
-                      name: 'John Doe'
-                    },
-                    wa_id: '1234567890'
+              time: Date.now(),
+              id: '17841405765924832',
+              messaging: [
+                {
+                  sender: {
+                    id: '1666639284565392'
+                  },
+                  recipient: {
+                    id: '17841405765924832'
+                  },
+                  timestamp: Date.now(),
+                  message: {
+                    mid: generatedMid,
+                    text: 'Hello, this is a mock Instagram DM!'
                   }
-                ],
-                messages: [
-                  {
-                    from: '1234567890',
-                    id: 'wamid.HBgLMTIzNDU2Nzg5MFVJZCEyMzQ1Njc4OTBBAA==',
-                    timestamp: Math.floor(Date.now() / 1000).toString(),
-                    text: {
-                      body: 'Hello, this is a mock test message from John Doe!'
-                    },
-                    type: 'text'
-                  }
-                ]
-              },
-              field: 'messages'
+                }
+              ]
             }
           ]
-        }
-      ]
-    };
+        };
+      } else if (type === 'instagram-hii') {
+        payload = {
+          object: 'instagram',
+          entry: [
+            {
+              time: Date.now(),
+              id: '17841405765924832',
+              messaging: [
+                {
+                  sender: {
+                    id: '1666639284565392'
+                  },
+                  recipient: {
+                    id: '17841405765924832'
+                  },
+                  timestamp: Date.now(),
+                  message: {
+                    mid: generatedMid,
+                    text: 'Hii'
+                  }
+                }
+              ]
+            }
+          ]
+        };
+      } else if (type === 'instagram-edit') {
+        payload = {
+          object: 'instagram',
+          entry: [
+            {
+              time: 1783880292583,
+              id: '17841405765924832',
+              messaging: [
+                {
+                  sender: {
+                    id: '1666639284565392'
+                  },
+                  recipient: {
+                    id: '17841405765924832'
+                  },
+                  timestamp: 1783880292117,
+                  message_edit: {
+                    mid: generatedMid + '_edit',
+                    num_edit: 0
+                  }
+                }
+              ]
+            }
+          ]
+        };
+      } else {
+        payload = {
+          object: 'whatsapp_business_account',
+          entry: [
+            {
+              id: 'WHATSAPP_BUSINESS_ACCOUNT_ID',
+              changes: [
+                {
+                  value: {
+                    messaging_product: 'whatsapp',
+                    metadata: {
+                      display_phone_number: '15550000000',
+                      phone_number_id: '100000000000000'
+                    },
+                    contacts: [
+                      {
+                        profile: {
+                          name: 'John Doe'
+                        },
+                        wa_id: '1234567890'
+                      }
+                    ],
+                    messages: [
+                      {
+                        from: '1234567890',
+                        id: 'wamid.HBgLMTIzNDU2Nzg5MFVJZCEyMzQ1Njc4OTBBAA==',
+                        timestamp: Math.floor(Date.now() / 1000).toString(),
+                        text: {
+                          body: 'Hello, this is a mock test message from John Doe!'
+                        },
+                        type: 'text'
+                      }
+                    ]
+                  },
+                  field: 'messages'
+                }
+              ]
+            }
+          ]
+        };
+      }
+    }
 
-    const mockLog: WebhookLog = {
-      id: logId,
-      timestamp,
-      method: 'POST',
-      headers: {
-        'user-agent': 'Meta-Webhook-Simulator/1.0',
-        'content-type': 'application/json',
-        'x-hub-signature-256': 'sha256=mock_signature_for_integrity_verification_12345',
-        ...customHeaders
-      },
-      query: customQuery || {},
-      body: payload,
-      status: 'received',
-      message: 'Successfully received webhook event payload.',
-    };
-
-    logs.unshift(mockLog);
-    res.json({ success: true, message: 'Mock event logged.' });
+    try {
+      const forwardRes = await fetch('http://localhost:3000/api/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Meta-Webhook-Simulator/1.0',
+        },
+        body: JSON.stringify(payload),
+      });
+      const forwardData: any = await forwardRes.json();
+      res.json({ success: true, message: 'Mock event logged and auto-reply triggered.', receivedId: forwardData.receivedId });
+    } catch (err: any) {
+      console.error('Failed to forward mock webhook:', err);
+      res.status(500).json({ error: 'Failed to forward mock event', details: err.message });
+    }
   }
 });
 
@@ -262,63 +351,38 @@ router.post('/webhook', (req, res) => {
   const messagingEvents = body.entry?.[0]?.messaging || [];
   let customMessage = 'Incoming event payload received.';
   const messagesFound: string[] = [];
+  const eventsToReply: any[] = [];
 
   for (const event of messagingEvents) {
-    console.log("Event Type:", Object.keys(event));
-
     if (event.message?.text) {
       const senderId = event.sender?.id;
       const text = event.message.text;
-      console.log("Sender ID:", senderId);
-      console.log("Message:", text);
-      messagesFound.push(`Instagram message from ${senderId}: "${text}"`);
+      const isEcho = !!event.message.is_echo;
+      const mid = event.message.mid;
 
-      // Trigger automatic reply if PAGE_ACCESS_TOKEN is configured
-      const pageAccessToken = process.env.PAGE_ACCESS_TOKEN;
-      if (pageAccessToken && senderId) {
-        console.log(`Sending auto-reply to Sender: ${senderId}...`);
-        fetch(
-          `https://graph.facebook.com/v25.0/me/messages?access_token=${pageAccessToken}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              recipient: {
-                id: senderId,
-              },
-              message: {
-                text: "Hello! Thanks for messaging SFR DigTech.",
-              },
-            }),
-          }
-        )
-        .then(async (response) => {
-          const contentType = response.headers.get("content-type") || "";
-          const text = await response.text();
-          if (contentType.includes("application/json")) {
-            try {
-              const resData = JSON.parse(text);
-              console.log("Auto-reply response:", JSON.stringify(resData, null, 2));
-            } catch (jsonErr) {
-              console.error("Failed to parse auto-reply JSON response:", jsonErr, "Original text:", text);
-            }
-          } else {
-            console.log("Auto-reply response (non-JSON text):", text);
-          }
-        })
-        .catch((err) => {
-          console.error("Error sending auto-reply:", err);
-        });
+      if (isEcho) {
+        messagesFound.push(`Instagram echo (ignored self message): "${text}"`);
+      } else if (mid && processedMids.has(mid)) {
+        messagesFound.push(`Instagram duplicate message (mid: ${mid.substring(0, 8)}... ignored): "${text}"`);
       } else {
-        console.log("Skipping auto-reply: PAGE_ACCESS_TOKEN or senderId is missing.");
+        if (mid) {
+          processedMids.add(mid);
+          // Keep set size reasonable
+          if (processedMids.size > 2000) {
+            const oldest = Array.from(processedMids).slice(0, 200);
+            oldest.forEach(k => processedMids.delete(k));
+          }
+        }
+        messagesFound.push(`Instagram message from ${senderId}: "${text}"`);
+        eventsToReply.push(event);
       }
     }
 
     if (event.message_edit) {
-      console.log("Message Edit Event");
-      messagesFound.push(`Message Edit Event`);
+      const senderId = event.sender?.id || 'Unknown';
+      const mid = event.message_edit.mid || '';
+      const numEdit = event.message_edit.num_edit !== undefined ? event.message_edit.num_edit : 0;
+      messagesFound.push(`Instagram message edited by ${senderId} (mid: ${mid ? (mid.substring(0, 12) + '...') : 'N/A'}, edits: ${numEdit})`);
     }
   }
 
@@ -365,8 +429,74 @@ router.post('/webhook', (req, res) => {
     logs = logs.slice(0, 100);
   }
 
-  // Always respond with a 200 OK to acknowledge receipt
+  // Always respond with a 200 OK immediately to satisfy Meta requirements & bypass slow processing
   res.status(200).json({ success: true, receivedId: logId });
+
+  // Only run the auto-reply asynchronously in the background if we actually have incoming messages to reply to
+  if (eventsToReply.length === 0) {
+    return;
+  }
+
+  const delayMs = (config.replyDelaySeconds || 0) * 1000;
+  console.log(`Scheduling auto-reply asynchronously with ${config.replyDelaySeconds || 0}s delay...`);
+
+  setTimeout(async () => {
+    const updatedMessagesFound = [...messagesFound];
+    let autoReplyTriggered = false;
+
+    for (const event of eventsToReply) {
+      const senderId = event.sender?.id;
+      const tokenToUse = config.pageAccessToken || process.env.PAGE_ACCESS_TOKEN;
+      const autoReplyText = config.autoReplyText || 'Hello! Thanks for messaging SFR DigTech.';
+      if (tokenToUse && senderId) {
+        autoReplyTriggered = true;
+        console.log(`Sending asynchronous auto-reply to Sender: ${senderId}...`);
+        try {
+          const response = await fetch(
+            `https://graph.facebook.com/v25.0/me/messages?access_token=${tokenToUse}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                recipient: {
+                  id: senderId,
+                },
+                message: {
+                  text: autoReplyText,
+                },
+              }),
+            }
+          );
+          const resText = await response.text();
+          if (response.ok) {
+            console.log("Asynchronous auto-reply success response:", resText);
+            updatedMessagesFound.push(`[Auto-Reply Sent after ${config.replyDelaySeconds || 0}s] "${autoReplyText}"`);
+          } else {
+            console.error("Asynchronous auto-reply API error:", resText);
+            updatedMessagesFound.push(`[Auto-Reply Failed] Status ${response.status}: ${resText.substring(0, 80)}`);
+          }
+        } catch (err: any) {
+          console.error("Error sending asynchronous auto-reply:", err);
+          updatedMessagesFound.push(`[Auto-Reply Error]: ${err.message}`);
+        }
+      } else {
+        const reason = !tokenToUse ? "PAGE_ACCESS_TOKEN is missing" : "senderId is missing";
+        console.log(`Skipping asynchronous auto-reply: ${reason}.`);
+        updatedMessagesFound.push(`[Auto-Reply Skipped] ${reason}`);
+      }
+    }
+
+    if (autoReplyTriggered) {
+      const finalMessage = updatedMessagesFound.join(' | ');
+      // Update our log with the result of the async task
+      const targetLog = logs.find(l => l.id === logId);
+      if (targetLog) {
+        targetLog.message = finalMessage;
+      }
+    }
+  }, delayMs);
 });
 
 // Mount the Router under both /api and / to handle Vercel routing variants flawlessly
