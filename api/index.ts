@@ -9,7 +9,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // In-memory storage (Note: serverless environments may recycle memory)
 let config: WebhookConfig = {
-  verifyToken: 'meta_verify_token_example_123',
+  verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || 'meta_verify_token_example_123',
 };
 let logs: WebhookLog[] = [];
 
@@ -204,8 +204,12 @@ router.get('/webhook', (req, res) => {
 
       console.log(`Webhook verification successful. Returning challenge: ${challenge}`);
 
-      // Crucial: Respond with challenge as PLAIN TEXT
+      // Crucial: Respond with challenge as PLAIN TEXT and prevent caching
       res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
       res.status(200).send(String(challenge));
     } else {
       // Log failed verification (token mismatch)
