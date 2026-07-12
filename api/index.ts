@@ -12,7 +12,7 @@ let config: WebhookConfig = {
   verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || 'meta_verify_token_example_123',
   pageAccessToken: process.env.PAGE_ACCESS_TOKEN || '',
   autoReplyText: process.env.AUTO_REPLY_TEXT || 'Hello! Thanks for messaging SFR DigTech.',
-  replyDelaySeconds: parseInt(process.env.REPLY_DELAY_SECONDS || '120', 10), // Default to 120 seconds (2 mins) as requested
+  replyDelaySeconds: parseInt(process.env.REPLY_DELAY_SECONDS || '0', 10), // Default to 0 seconds (Instant) as recommended for serverless environments
 };
 let logs: WebhookLog[] = [];
 const processedMids = new Set<string>();
@@ -429,74 +429,137 @@ router.post('/webhook', (req, res) => {
     logs = logs.slice(0, 100);
   }
 
-  // Always respond with a 200 OK immediately to satisfy Meta requirements & bypass slow processing
-  res.status(200).json({ success: true, receivedId: logId });
-
-  // Only run the auto-reply asynchronously in the background if we actually have incoming messages to reply to
+  // Only run the auto-reply if we actually have incoming messages to reply to
   if (eventsToReply.length === 0) {
+    res.status(200).json({ success: true, receivedId: logId });
     return;
   }
 
   const delayMs = (config.replyDelaySeconds || 0) * 1000;
-  console.log(`Scheduling auto-reply asynchronously with ${config.replyDelaySeconds || 0}s delay...`);
 
-  setTimeout(async () => {
+  if (delayMs === 0) {
+    // Run the auto-reply synchronously before responding so that the serverless container stays active
+    console.log(`Sending auto-reply instantly (0s delay) synchronously...`);
     const updatedMessagesFound = [...messagesFound];
     let autoReplyTriggered = false;
 
-    for (const event of eventsToReply) {
-      const senderId = event.sender?.id;
-      const tokenToUse = config.pageAccessToken || process.env.PAGE_ACCESS_TOKEN;
-      const autoReplyText = config.autoReplyText || 'Hello! Thanks for messaging SFR DigTech.';
-      if (tokenToUse && senderId) {
-        autoReplyTriggered = true;
-        console.log(`Sending asynchronous auto-reply to Sender: ${senderId}...`);
-        try {
-          const response = await fetch(
-            `https://graph.facebook.com/v25.0/me/messages?access_token=${tokenToUse}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                recipient: {
-                  id: senderId,
+    // We do this in an IIFE to keep code clean or just inline
+    (async () => {
+      for (const event of eventsToReply) {
+        const senderId = event.sender?.id;
+        const tokenToUse = config.pageAccessToken || process.env.PAGE_ACCESS_TOKEN;
+        const autoReplyText = config.autoReplyText || 'Hello! Thanks for messaging SFR DigTech.';
+        if (tokenToUse && senderId) {
+          autoReplyTriggered = true;
+          console.log(`Sending instant auto-reply to Sender: ${senderId}...`);
+          try {
+            const response = await fetch(
+              `https://graph.facebook.com/v25.0/me/messages?access_token=${tokenToUse}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
                 },
-                message: {
-                  text: autoReplyText,
-                },
-              }),
+                body: JSON.stringify({
+                  recipient: {
+                    id: senderId,
+                  },
+                  message: {
+                    text: autoReplyText,
+                  },
+                }),
+              }
+            );
+            const resText = await response.text();
+            if (response.ok) {
+              console.log("Instant auto-reply success response:", resText);
+              updatedMessagesFound.push(`[Auto-Reply Sent Instantly] "${autoReplyText}"`);
+            } else {
+              console.error("Instant auto-reply API error:", resText);
+              updatedMessagesFound.push(`[Auto-Reply Failed] Status ${response.status}: ${resText.substring(0, 80)}`);
             }
-          );
-          const resText = await response.text();
-          if (response.ok) {
-            console.log("Asynchronous auto-reply success response:", resText);
-            updatedMessagesFound.push(`[Auto-Reply Sent after ${config.replyDelaySeconds || 0}s] "${autoReplyText}"`);
-          } else {
-            console.error("Asynchronous auto-reply API error:", resText);
-            updatedMessagesFound.push(`[Auto-Reply Failed] Status ${response.status}: ${resText.substring(0, 80)}`);
+          } catch (err: any) {
+            console.error("Error sending instant auto-reply:", err);
+            updatedMessagesFound.push(`[Auto-Reply Error]: ${err.message}`);
           }
-        } catch (err: any) {
-          console.error("Error sending asynchronous auto-reply:", err);
-          updatedMessagesFound.push(`[Auto-Reply Error]: ${err.message}`);
+        } else {
+          const reason = !tokenToUse ? "PAGE_ACCESS_TOKEN is missing" : "senderId is missing";
+          console.log(`Skipping instant auto-reply: ${reason}.`);
+          updatedMessagesFound.push(`[Auto-Reply Skipped] ${reason}`);
         }
-      } else {
-        const reason = !tokenToUse ? "PAGE_ACCESS_TOKEN is missing" : "senderId is missing";
-        console.log(`Skipping asynchronous auto-reply: ${reason}.`);
-        updatedMessagesFound.push(`[Auto-Reply Skipped] ${reason}`);
       }
-    }
 
-    if (autoReplyTriggered) {
-      const finalMessage = updatedMessagesFound.join(' | ');
-      // Update our log with the result of the async task
-      const targetLog = logs.find(l => l.id === logId);
-      if (targetLog) {
-        targetLog.message = finalMessage;
+      if (autoReplyTriggered) {
+        const finalMessage = updatedMessagesFound.join(' | ');
+        newLog.message = finalMessage;
       }
-    }
-  }, delayMs);
+
+      // Respond 200 OK after execution finishes
+      res.status(200).json({ success: true, receivedId: logId });
+    })();
+  } else {
+    // Always respond with a 200 OK immediately for delayed replies, though they may fail if the container goes to sleep
+    res.status(200).json({ success: true, receivedId: logId });
+
+    console.log(`Scheduling auto-reply asynchronously with ${config.replyDelaySeconds || 0}s delay...`);
+    setTimeout(async () => {
+      const updatedMessagesFound = [...messagesFound];
+      let autoReplyTriggered = false;
+
+      for (const event of eventsToReply) {
+        const senderId = event.sender?.id;
+        const tokenToUse = config.pageAccessToken || process.env.PAGE_ACCESS_TOKEN;
+        const autoReplyText = config.autoReplyText || 'Hello! Thanks for messaging SFR DigTech.';
+        if (tokenToUse && senderId) {
+          autoReplyTriggered = true;
+          console.log(`Sending asynchronous auto-reply to Sender: ${senderId}...`);
+          try {
+            const response = await fetch(
+              `https://graph.facebook.com/v25.0/me/messages?access_token=${tokenToUse}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  recipient: {
+                    id: senderId,
+                  },
+                  message: {
+                    text: autoReplyText,
+                  },
+                }),
+              }
+            );
+            const resText = await response.text();
+            if (response.ok) {
+              console.log("Asynchronous auto-reply success response:", resText);
+              updatedMessagesFound.push(`[Auto-Reply Sent after ${config.replyDelaySeconds || 0}s] "${autoReplyText}"`);
+            } else {
+              console.error("Asynchronous auto-reply API error:", resText);
+              updatedMessagesFound.push(`[Auto-Reply Failed] Status ${response.status}: ${resText.substring(0, 80)}`);
+            }
+          } catch (err: any) {
+            console.error("Error sending asynchronous auto-reply:", err);
+            updatedMessagesFound.push(`[Auto-Reply Error]: ${err.message}`);
+          }
+        } else {
+          const reason = !tokenToUse ? "PAGE_ACCESS_TOKEN is missing" : "senderId is missing";
+          console.log(`Skipping asynchronous auto-reply: ${reason}.`);
+          updatedMessagesFound.push(`[Auto-Reply Skipped] ${reason}`);
+        }
+      }
+
+      if (autoReplyTriggered) {
+        const finalMessage = updatedMessagesFound.join(' | ');
+        // Update our log with the result of the async task
+        const targetLog = logs.find(l => l.id === logId);
+        if (targetLog) {
+          targetLog.message = finalMessage;
+        }
+      }
+    }, delayMs);
+  }
 });
 
 // Mount the Router under both /api and / to handle Vercel routing variants flawlessly

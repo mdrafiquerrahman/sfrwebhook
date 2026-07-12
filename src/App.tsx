@@ -28,7 +28,7 @@ export default function App() {
   const [inputToken, setInputToken] = useState('');
   const [inputPageAccessToken, setInputPageAccessToken] = useState('');
   const [inputAutoReplyText, setInputAutoReplyText] = useState('');
-  const [inputReplyDelaySeconds, setInputReplyDelaySeconds] = useState<number>(120);
+  const [inputReplyDelaySeconds, setInputReplyDelaySeconds] = useState<number>(0);
   const [logs, setLogs] = useState<WebhookLog[]>([]);
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'simulator' | 'custom'>('simulator');
@@ -107,7 +107,7 @@ export default function App() {
       setInputToken(configData.verifyToken);
       setInputPageAccessToken(configData.pageAccessToken || '');
       setInputAutoReplyText(configData.autoReplyText || '');
-      setInputReplyDelaySeconds(configData.replyDelaySeconds !== undefined ? configData.replyDelaySeconds : 120);
+      setInputReplyDelaySeconds(configData.replyDelaySeconds !== undefined ? configData.replyDelaySeconds : 0);
       setLogs(logsData);
       setError(null);
       setIsReconnecting(false);
@@ -514,16 +514,16 @@ export default function App() {
                       onChange={(e) => setInputReplyDelaySeconds(Number(e.target.value))}
                       className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all cursor-pointer"
                     >
-                      <option value={0}>Instant (0 seconds)</option>
+                      <option value={0}>Instant (0 seconds) (Recommended)</option>
                       <option value={5}>5 seconds</option>
                       <option value={30}>30 seconds</option>
                       <option value={60}>1 minute</option>
-                      <option value={120}>2 minutes (Default)</option>
+                      <option value={120}>2 minutes</option>
                       <option value={180}>3 minutes</option>
                       <option value={300}>5 minutes</option>
                     </select>
                     <p className="text-[10px] text-slate-400 mt-1">
-                      Controls how long the system waits before sending the auto-reply back to the client.
+                      Controls the reply wait time. <strong>Instant (0 seconds)</strong> is highly recommended on serverless platforms (like Vercel or Cloud Run) so the server stays active.
                     </p>
                   </div>
 
@@ -535,7 +535,7 @@ export default function App() {
                       (inputToken === config?.verifyToken && 
                        inputPageAccessToken === (config?.pageAccessToken || '') &&
                        inputAutoReplyText === (config?.autoReplyText || '') &&
-                       inputReplyDelaySeconds === (config?.replyDelaySeconds ?? 120))
+                       inputReplyDelaySeconds === (config?.replyDelaySeconds ?? 0))
                     }
                     className="w-full mt-2 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all border border-transparent shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                   >
