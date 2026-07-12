@@ -337,7 +337,7 @@ router.get('/webhook', (req, res) => {
 });
 
 // API / Webhook Endpoint: Receive Webhook Events (POST)
-router.post('/webhook', (req, res) => {
+router.post('/webhook', async (req, res) => {
   const logId = Math.random().toString(36).substring(2, 11);
   const timestamp = new Date().toISOString();
 
@@ -443,60 +443,57 @@ router.post('/webhook', (req, res) => {
     const updatedMessagesFound = [...messagesFound];
     let autoReplyTriggered = false;
 
-    // We do this in an IIFE to keep code clean or just inline
-    (async () => {
-      for (const event of eventsToReply) {
-        const senderId = event.sender?.id;
-        const tokenToUse = config.pageAccessToken || process.env.PAGE_ACCESS_TOKEN;
-        const autoReplyText = config.autoReplyText || 'Hello! Thanks for messaging SFR DigTech.';
-        if (tokenToUse && senderId) {
-          autoReplyTriggered = true;
-          console.log(`Sending instant auto-reply to Sender: ${senderId}...`);
-          try {
-            const response = await fetch(
-              `https://graph.facebook.com/v25.0/me/messages?access_token=${tokenToUse}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
+    for (const event of eventsToReply) {
+      const senderId = event.sender?.id;
+      const tokenToUse = config.pageAccessToken || process.env.PAGE_ACCESS_TOKEN;
+      const autoReplyText = config.autoReplyText || 'Hello! Thanks for messaging SFR DigTech.';
+      if (tokenToUse && senderId) {
+        autoReplyTriggered = true;
+        console.log(`Sending instant auto-reply to Sender: ${senderId}...`);
+        try {
+          const response = await fetch(
+            `https://graph.facebook.com/v25.0/me/messages?access_token=${tokenToUse}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                recipient: {
+                  id: senderId,
                 },
-                body: JSON.stringify({
-                  recipient: {
-                    id: senderId,
-                  },
-                  message: {
-                    text: autoReplyText,
-                  },
-                }),
-              }
-            );
-            const resText = await response.text();
-            if (response.ok) {
-              console.log("Instant auto-reply success response:", resText);
-              updatedMessagesFound.push(`[Auto-Reply Sent Instantly] "${autoReplyText}"`);
-            } else {
-              console.error("Instant auto-reply API error:", resText);
-              updatedMessagesFound.push(`[Auto-Reply Failed] Status ${response.status}: ${resText.substring(0, 80)}`);
+                message: {
+                  text: autoReplyText,
+                },
+              }),
             }
-          } catch (err: any) {
-            console.error("Error sending instant auto-reply:", err);
-            updatedMessagesFound.push(`[Auto-Reply Error]: ${err.message}`);
+          );
+          const resText = await response.text();
+          if (response.ok) {
+            console.log("Instant auto-reply success response:", resText);
+            updatedMessagesFound.push(`[Auto-Reply Sent Instantly] "${autoReplyText}"`);
+          } else {
+            console.error("Instant auto-reply API error:", resText);
+            updatedMessagesFound.push(`[Auto-Reply Failed] Status ${response.status}: ${resText.substring(0, 80)}`);
           }
-        } else {
-          const reason = !tokenToUse ? "PAGE_ACCESS_TOKEN is missing" : "senderId is missing";
-          console.log(`Skipping instant auto-reply: ${reason}.`);
-          updatedMessagesFound.push(`[Auto-Reply Skipped] ${reason}`);
+        } catch (err: any) {
+          console.error("Error sending instant auto-reply:", err);
+          updatedMessagesFound.push(`[Auto-Reply Error]: ${err.message}`);
         }
+      } else {
+        const reason = !tokenToUse ? "PAGE_ACCESS_TOKEN is missing" : "senderId is missing";
+        console.log(`Skipping instant auto-reply: ${reason}.`);
+        updatedMessagesFound.push(`[Auto-Reply Skipped] ${reason}`);
       }
+    }
 
-      if (autoReplyTriggered) {
-        const finalMessage = updatedMessagesFound.join(' | ');
-        newLog.message = finalMessage;
-      }
+    if (autoReplyTriggered) {
+      const finalMessage = updatedMessagesFound.join(' | ');
+      newLog.message = finalMessage;
+    }
 
-      // Respond 200 OK after execution finishes
-      res.status(200).json({ success: true, receivedId: logId });
-    })();
+    // Respond 200 OK after execution finishes
+    res.status(200).json({ success: true, receivedId: logId });
   } else {
     // Always respond with a 200 OK immediately for delayed replies, though they may fail if the container goes to sleep
     res.status(200).json({ success: true, receivedId: logId });
